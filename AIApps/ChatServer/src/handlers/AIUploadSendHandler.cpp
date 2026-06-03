@@ -28,9 +28,13 @@ void AIUploadSendHandler::handle(const http::HttpRequest& req, http::HttpRespons
             std::lock_guard<std::mutex> lock(server_->mutexForImageRecognizerMap);
             if (server_->ImageRecognizerMap.find(userId) == server_->ImageRecognizerMap.end()) {
 
+                const char* modelPath = std::getenv("ONNX_MODEL_PATH");
+                const char* labelPath = std::getenv("ONNX_LABEL_PATH");
                 server_->ImageRecognizerMap.emplace(
                     userId,
-                    std::make_shared<ImageRecognizer>("/root/models/mobilenetv2/mobilenetv2-7.onnx")  //todo:Remove hard coding
+                    std::make_shared<ImageRecognizer>(
+                        modelPath ? modelPath : "/root/models/mobilenetv2/mobilenetv2-7.onnx",
+                        labelPath ? labelPath : "/root/imagenet_classes.txt")
                 );
             }
             ImageRecognizerPtr = server_->ImageRecognizerMap[userId];

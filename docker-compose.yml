@@ -1,0 +1,80 @@
+version: "3.8"
+
+services:
+
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE:      ${DB_NAME}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test:
+        - "CMD"
+        - "mysqladmin"
+        - "ping"
+        - "-h"
+        - "localhost"
+        - "-u"
+        - "root"
+        - "--password=${MYSQL_ROOT_PASSWORD}"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - "15672:15672"   # management UI — remove in production
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      # MySQL
+      DB_HOST:     mysql
+      DB_USER:     root
+      DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      DB_NAME:     ${DB_NAME}
+      # RabbitMQ
+      RABBITMQ_HOST:     rabbitmq
+      RABBITMQ_USER:     ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      # ONNX image recognition
+      ONNX_MODEL_PATH: ${ONNX_MODEL_PATH}
+      ONNX_LABEL_PATH: ${ONNX_LABEL_PATH}
+      # AI services
+      DASHSCOPE_API_KEY:   ${DASHSCOPE_API_KEY}
+      DOUBAO_API_KEY:      ${DOUBAO_API_KEY}
+      Knowledge_Base_ID:   ${Knowledge_Base_ID}
+      BAIDU_CLIENT_ID:     ${BAIDU_CLIENT_ID}
+      BAIDU_CLIENT_SECRET: ${BAIDU_CLIENT_SECRET}
+    ports:
+      - "8116:8116"
+
+volumes:
+  mysql_data:
+  rabbitmq_data:
