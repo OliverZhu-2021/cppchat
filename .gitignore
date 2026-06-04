@@ -70,3 +70,6 @@ Testing/
 
 # .env
 .env
+
+# Pre-downloaded build dependencies (large binaries, not committed to repo)
+deps/

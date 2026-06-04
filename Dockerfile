@@ -7,8 +7,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
-    git \
-    wget \
     ca-certificates \
     pkg-config \
     libssl-dev \
@@ -20,37 +18,37 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nlohmann-json3-dev \
   && rm -rf /var/lib/apt/lists/*
 
-# 2. Muduo network library (not in apt)
-RUN git clone --depth 1 --branch v2.0.2 \
-        https://github.com/chenshuo/muduo.git /tmp/muduo \
+# 2. Muduo network library — built from pre-downloaded tarball
+COPY deps/muduo-v2.0.2.tar.gz /tmp/muduo.tar.gz
+RUN tar -xzf /tmp/muduo.tar.gz -C /tmp \
+  && mv /tmp/muduo-2.0.2 /tmp/muduo \
   && cmake -S /tmp/muduo -B /tmp/muduo/build \
        -DCMAKE_BUILD_TYPE=Release \
        -DMUDUO_BUILD_EXAMPLES=OFF \
        -DMUDUO_BUILD_TESTS=OFF \
   && cmake --build /tmp/muduo/build --parallel $(nproc) \
   && cmake --install /tmp/muduo/build \
-  && rm -rf /tmp/muduo
+  && rm -rf /tmp/muduo /tmp/muduo.tar.gz
 
-# 3. ONNX Runtime 1.20.0 binary release (not in apt)
-RUN wget -q \
-      https://github.com/microsoft/onnxruntime/releases/download/v1.20.0/onnxruntime-linux-x64-1.20.0.tgz \
-      -O /tmp/ort.tgz \
-  && tar -xzf /tmp/ort.tgz -C /tmp \
+# 3. ONNX Runtime 1.20.0 — installed from pre-downloaded tarball
+COPY deps/onnxruntime-linux-x64-1.20.0.tgz /tmp/ort.tgz
+RUN tar -xzf /tmp/ort.tgz -C /tmp \
   && cp -r /tmp/onnxruntime-linux-x64-1.20.0/include/. /usr/local/include/ \
   && cp -r /tmp/onnxruntime-linux-x64-1.20.0/lib/.     /usr/local/lib/ \
   && ldconfig \
   && rm -rf /tmp/ort.tgz /tmp/onnxruntime-linux-x64-1.20.0
 
-# 4. SimpleAmqpClient (not in apt; depends on librabbitmq-dev)
-RUN git clone --depth 1 --branch v2.5.1 \
-        https://github.com/alanxz/SimpleAmqpClient.git /tmp/SimpleAmqpClient \
+# 4. SimpleAmqpClient — built from pre-downloaded tarball
+COPY deps/SimpleAmqpClient-v2.5.1.tar.gz /tmp/SimpleAmqpClient.tar.gz
+RUN tar -xzf /tmp/SimpleAmqpClient.tar.gz -C /tmp \
+  && mv /tmp/SimpleAmqpClient-2.5.1 /tmp/SimpleAmqpClient \
   && cmake -S /tmp/SimpleAmqpClient -B /tmp/SimpleAmqpClient/build \
        -DCMAKE_BUILD_TYPE=Release \
        -DCMAKE_INSTALL_PREFIX=/usr/local \
   && cmake --build /tmp/SimpleAmqpClient/build --parallel $(nproc) \
   && cmake --install /tmp/SimpleAmqpClient/build \
   && ldconfig \
-  && rm -rf /tmp/SimpleAmqpClient
+  && rm -rf /tmp/SimpleAmqpClient /tmp/SimpleAmqpClient.tar.gz
 
 # 5. Build the application
 WORKDIR /src
@@ -77,8 +75,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopencv-videoio4.5d \
     libopencv-dnn4.5d \
     librabbitmq4 \
-    wget \
-    ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy manually-installed shared libraries from builder
@@ -87,17 +83,10 @@ COPY --from=builder /usr/local/lib/libSimpleAmqpClient*.so* /usr/local/lib/
 
 RUN ldconfig
 
-# Download MobileNetV2 ONNX model and ImageNet labels
-# Override at runtime by mounting a volume and setting ONNX_MODEL_PATH / ONNX_LABEL_PATH
-RUN mkdir -p /root/models/mobilenetv2 \
-  && wget -q \
-       https://github.com/onnx/models/raw/main/validated/vision/classification/mobilenet/model/mobilenetv2-7.onnx \
-       -O /root/models/mobilenetv2/mobilenetv2-7.onnx \
-  && wget -q \
-       https://raw.githubusercontent.com/pytorch/hub/master/imagenet_classes.txt \
-       -O /root/imagenet_classes.txt \
-  && apt-get purge -y --auto-remove wget \
-  && rm -rf /var/lib/apt/lists/*
+# Copy MobileNetV2 ONNX model and ImageNet labels from pre-downloaded files
+RUN mkdir -p /root/models/mobilenetv2
+COPY deps/mobilenetv2-7.onnx    /root/models/mobilenetv2/mobilenetv2-7.onnx
+COPY deps/imagenet_classes.txt  /root/imagenet_classes.txt
 
 # Binary CWD is /app/build so that ../AIApps/ChatServer/resource/config.json resolves correctly
 WORKDIR /app
