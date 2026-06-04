@@ -59,7 +59,7 @@ COPY . .
 
 RUN cmake -S . -B build \
       -DCMAKE_BUILD_TYPE=Release \
-  && cmake --build build --parallel $(nproc)
+  && cmake --build build --parallel 2
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM ubuntu:22.04 AS runtime
