@@ -68,7 +68,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl3 \
     libcurl4 \
-    libmysqlcppconn9 \
+    libmysqlcppconn-dev \
     libmysqlclient21 \
     libopencv-core4.5d \
     libopencv-imgproc4.5d \
