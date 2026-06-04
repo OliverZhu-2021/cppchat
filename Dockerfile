@@ -16,6 +16,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopencv-dev \
     librabbitmq-dev \
     nlohmann-json3-dev \
+    libboost-chrono-dev \
+    libboost-system-dev \
+    libboost-thread-dev \
   && rm -rf /var/lib/apt/lists/*
 
 # 2. Muduo network library — built from pre-downloaded tarball
