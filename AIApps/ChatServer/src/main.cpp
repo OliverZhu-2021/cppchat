@@ -2,13 +2,15 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <cstdlib>
 #include <muduo/net/TcpServer.h>
 #include <muduo/base/Logging.h>
 #include <muduo/net/EventLoop.h>
 
 #include"../include/ChatServer.h"
 
-const std::string RABBITMQ_HOST = "localhost";
+const char* _mq_host_env = std::getenv("RABBITMQ_HOST");
+const std::string RABBITMQ_HOST = _mq_host_env ? _mq_host_env : "localhost";
 const std::string QUEUE_NAME = "sql_queue";
 const int THREAD_NUM = 2;
 

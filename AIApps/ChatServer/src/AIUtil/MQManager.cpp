@@ -1,13 +1,18 @@
 #include"../include/AIUtil/MQManager.h"
+#include <cstdlib>
 
 // ------------------- MQManager -------------------
 MQManager::MQManager(size_t poolSize)
     : poolSize_(poolSize), counter_(0) {
+    const char* host = std::getenv("RABBITMQ_HOST");
+    const char* user = std::getenv("RABBITMQ_USER");
+    const char* pass = std::getenv("RABBITMQ_PASSWORD");
+    const std::string mq_host = host ? host : "localhost";
+    const std::string mq_user = user ? user : "guest";
+    const std::string mq_pass = pass ? pass : "guest";
     for (size_t i = 0; i < poolSize_; ++i) {
         auto conn = std::make_shared<MQConn>();
-        //  Create
-        conn->channel = AmqpClient::Channel::Create("localhost", 5672, "guest", "guest", "/");
-
+        conn->channel = AmqpClient::Channel::Create(mq_host, 5672, mq_user, mq_pass, "/");
         pool_.push_back(conn);
     }
 }
@@ -38,8 +43,13 @@ void RabbitMQThreadPool::shutdown() {
 
 void RabbitMQThreadPool::worker(int id) {
     try {
-        // Each thread has its own independent channel
-        auto channel = AmqpClient::Channel::Create(rabbitmq_host_, 5672, "guest", "guest", "/");
+        const char* user = std::getenv("RABBITMQ_USER");
+        const char* pass = std::getenv("RABBITMQ_PASSWORD");
+        auto channel = AmqpClient::Channel::Create(
+            rabbitmq_host_, 5672,
+            user ? user : "guest",
+            pass ? pass : "guest",
+            "/");
         // set exclusive
         channel->DeclareQueue(queue_name_, false, true, false, false);
         // Prevent channel error: 403: AMQP_BASIC_CONSUME_METHOD caused: ACCESS_REFUSED - queue 
