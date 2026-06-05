@@ -78,6 +78,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libopencv-videoio4.5d \
     libopencv-dnn4.5d \
     librabbitmq4 \
+    libboost-chrono1.74.0 \
+    libboost-system1.74.0 \
+    libboost-thread1.74.0 \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy manually-installed shared libraries from builder
