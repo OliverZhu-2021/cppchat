@@ -356,6 +356,11 @@
 
             appendMessage('user', question);
 
+            if (!tempSession && (!currentSessionId || !sessions[currentSessionId])) {
+                currentSessionId = 'temp';
+                tempSession = true;
+            }
+
             if (tempSession) {
                 try {
                     const response = await fetch('/chat/send-new-session', {
