@@ -67,6 +67,7 @@ FROM ubuntu:22.04 AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     libssl3 \
     libcurl4 \
     libmysqlcppconn-dev \
