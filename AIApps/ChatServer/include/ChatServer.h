@@ -91,7 +91,7 @@ private:
 
 	http::MysqlUtil		mysqlUtil_;
 
-	std::unordered_map<int, bool>	onlineUsers_;
+	std::unordered_map<int, std::string>	onlineUsers_; // userId → active sessionId
 	std::mutex	mutexForOnlineUsers_;
 
 	
