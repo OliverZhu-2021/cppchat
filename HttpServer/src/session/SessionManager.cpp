@@ -61,6 +61,11 @@ void SessionManager::destroySession(const std::string& sessionId)
     storage_->remove(sessionId);
 }
 
+std::shared_ptr<Session> SessionManager::getSessionById(const std::string& sessionId)
+{
+    return storage_->load(sessionId);
+}
+
 void SessionManager::cleanExpiredSessions()
 {
     // 注意：这个实现依赖于具体的存储实现

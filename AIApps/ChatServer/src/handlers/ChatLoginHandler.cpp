@@ -25,18 +25,38 @@ void ChatLoginHandler::handle(const http::HttpRequest& req, http::HttpResponse* 
         int userId = queryUserId(username, password);
         if (userId != -1)
         {
-
-            auto session = server_->getSessionManager()->getSession(req, resp);
-
-
-            session->setValue("userId", std::to_string(userId));
-            session->setValue("username", username);
-            session->setValue("isLoggedIn", "true");
-            if (server_->onlineUsers_.find(userId) == server_->onlineUsers_.end() || server_->onlineUsers_[userId] == false)
+            // Check whether a prior session for this user is still alive.
+            // Read the stored sessionId under lock, then validate it outside the lock.
+            std::string storedSessionId;
             {
+                std::lock_guard<std::mutex> lock(server_->mutexForOnlineUsers_);
+                auto it = server_->onlineUsers_.find(userId);
+                if (it != server_->onlineUsers_.end())
+                    storedSessionId = it->second;
+            }
+
+            bool isAlreadyOnline = false;
+            if (!storedSessionId.empty())
+            {
+                auto existingSession = server_->getSessionManager()->getSessionById(storedSessionId);
+                isAlreadyOnline = (existingSession != nullptr);
+                if (!isAlreadyOnline)
+                {
+                    // Prior session has expired — remove the stale entry.
+                    std::lock_guard<std::mutex> lock(server_->mutexForOnlineUsers_);
+                    server_->onlineUsers_.erase(userId);
+                }
+            }
+
+            if (!isAlreadyOnline)
+            {
+                auto session = server_->getSessionManager()->getSession(req, resp);
+                session->setValue("userId", std::to_string(userId));
+                session->setValue("username", username);
+                session->setValue("isLoggedIn", "true");
                 {
                     std::lock_guard<std::mutex> lock(server_->mutexForOnlineUsers_);
-                    server_->onlineUsers_[userId] = true;
+                    server_->onlineUsers_[userId] = session->getId();
                 }
 
                 json successResp;
@@ -53,10 +73,9 @@ void ChatLoginHandler::handle(const http::HttpRequest& req, http::HttpResponse* 
             }
             else
             {
-
                 json failureResp;
                 failureResp["success"] = false;
-                failureResp["error"] = "˺ط¼";
+                failureResp["error"] = "已登录";
                 std::string failureBody = failureResp.dump(4);
 
                 resp->setStatusLine(req.getVersion(), http::HttpResponse::k403Forbidden, "Forbidden");

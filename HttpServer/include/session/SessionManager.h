@@ -19,8 +19,11 @@ public:
     // 从请求中获取或创建会话
     std::shared_ptr<Session> getSession(const HttpRequest& req, HttpResponse* resp);
     
-     // 销毁会话
+    // 销毁会话
     void destroySession(const std::string& sessionId);
+
+    // 通过会话ID获取会话（不更新cookie），过期或不存在时返回nullptr
+    std::shared_ptr<Session> getSessionById(const std::string& sessionId);
 
     // 清理过期会话
     void cleanExpiredSessions();
