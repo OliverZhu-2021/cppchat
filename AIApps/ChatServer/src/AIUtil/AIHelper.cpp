@@ -176,6 +176,193 @@ size_t AIHelper::WriteCallback(void* contents, size_t size, size_t nmemb, void* 
     return totalSize;
 }
 
+// ── Streaming helpers ────────────────────────────────────────────────────────
+
+void AIHelper::executeCurlStream(const json& payload, StreamContext* ctx) {
+    CURL* curl = curl_easy_init();
+    if (!curl) throw std::runtime_error("Failed to initialize curl");
+
+    struct curl_slist* headers = nullptr;
+    std::string authHeader = "Authorization: Bearer " + strategy->getApiKey();
+    headers = curl_slist_append(headers, authHeader.c_str());
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    std::string payloadStr = payload.dump();
+
+    curl_easy_setopt(curl, CURLOPT_URL, strategy->getApiUrl().c_str());
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payloadStr.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, StreamWriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, ctx);
+
+    CURLcode res = curl_easy_perform(curl);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK) {
+        throw std::runtime_error("curl stream failed: " + std::string(curl_easy_strerror(res)));
+    }
+}
+
+size_t AIHelper::StreamWriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
+    size_t totalSize = size * nmemb;
+    StreamContext* ctx = static_cast<StreamContext*>(userp);
+    ctx->lineBuffer.append(static_cast<char*>(contents), totalSize);
+
+    // Process every complete newline-terminated chunk
+    std::string& buf = ctx->lineBuffer;
+    size_t pos;
+    while ((pos = buf.find('\n')) != std::string::npos) {
+        std::string line = buf.substr(0, pos);
+        buf.erase(0, pos + 1);
+
+        // Strip trailing \r
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        if (line.rfind("data: ", 0) != 0) continue;
+
+        std::string data = line.substr(6);
+        if (data == "[DONE]") {
+            ctx->done = true;
+            if (ctx->onDone) ctx->onDone();
+            return totalSize;
+        }
+
+        try {
+            json chunk = json::parse(data);
+            std::string delta = ctx->strategy->parseStreamDelta(chunk);
+            if (!delta.empty() && ctx->onChunk) {
+                ctx->onChunk(delta);
+            }
+        } catch (...) {
+            // Malformed SSE line — skip
+        }
+    }
+    return totalSize;
+}
+
+void AIHelper::chatStream(int userId, std::string userName, std::string sessionId,
+                          std::string userQuestion, std::string modelType,
+                          std::function<void(const std::string& chunk)> onChunk,
+                          std::function<void()> onDone,
+                          std::function<void(const std::string& err)> onError) {
+    try {
+        setStrategy(StrategyFactory::instance().create(modelType));
+
+        if (!strategy->isMCPModel) {
+            // ── Non-MCP: single streaming LLM call ───────────────────────────
+            addMessage(userId, userName, true, userQuestion, sessionId);
+            json payload = strategy->buildRequest(this->messages);
+            payload["stream"] = true;
+
+            std::string fullAnswer;
+            StreamContext ctx;
+            ctx.strategy = strategy;
+            ctx.onChunk = [&](const std::string& chunk) {
+                fullAnswer += chunk;
+                onChunk(chunk);
+            };
+            ctx.onDone = [&]() {
+                addMessage(userId, userName, false, fullAnswer, sessionId);
+                onDone();
+            };
+
+            executeCurlStream(payload, &ctx);
+
+            // Fallback if the API never sent [DONE]
+            if (!ctx.done) {
+                addMessage(userId, userName, false, fullAnswer, sessionId);
+                onDone();
+            }
+            return;
+        }
+
+        // ── MCP: two sync calls + one streaming final answer ─────────────────
+        AIConfig config;
+        config.loadFromFile("../AIApps/ChatServer/resource/config.json");
+
+        onChunk("> 正在分析请求...\n\n");
+
+        std::string tempQuestion = config.buildPrompt(userQuestion);
+        messages.push_back({ tempQuestion, 0 });
+        json firstReq = strategy->buildRequest(this->messages);
+        json firstResp = executeCurl(firstReq);
+        std::string aiResult = strategy->parseResponse(firstResp);
+        messages.pop_back();
+
+        AIToolCall call = config.parseAIResponse(aiResult);
+
+        if (!call.isToolCall) {
+            // AI answered directly without a tool — stream that answer
+            addMessage(userId, userName, true, userQuestion, sessionId);
+            json payload = strategy->buildRequest(this->messages);
+            payload["stream"] = true;
+
+            std::string fullAnswer;
+            StreamContext ctx;
+            ctx.strategy = strategy;
+            ctx.onChunk = [&](const std::string& chunk) {
+                fullAnswer += chunk;
+                onChunk(chunk);
+            };
+            ctx.onDone = [&]() {
+                addMessage(userId, userName, false, fullAnswer, sessionId);
+                onDone();
+            };
+            executeCurlStream(payload, &ctx);
+            if (!ctx.done) {
+                addMessage(userId, userName, false, fullAnswer, sessionId);
+                onDone();
+            }
+            return;
+        }
+
+        // Tool required
+        onChunk("> 正在调用工具: " + call.toolName + "...\n\n");
+        json toolResult;
+        AIToolRegistry registry;
+        try {
+            toolResult = registry.invoke(call.toolName, call.args);
+        } catch (const std::exception& e) {
+            std::string err = "[工具调用失败] " + std::string(e.what());
+            addMessage(userId, userName, true, userQuestion, sessionId);
+            addMessage(userId, userName, false, err, sessionId);
+            onChunk(err);
+            onDone();
+            return;
+        }
+
+        // Second LLM call — stream the final answer
+        onChunk("> 工具调用成功，正在生成回答...\n\n");
+        std::string secondPrompt = config.buildToolResultPrompt(userQuestion, call.toolName, call.args, toolResult);
+        messages.push_back({ secondPrompt, 0 });
+        json secondReq = strategy->buildRequest(messages);
+        secondReq["stream"] = true;
+        messages.pop_back();
+
+        addMessage(userId, userName, true, userQuestion, sessionId);
+        std::string fullAnswer;
+        StreamContext ctx;
+        ctx.strategy = strategy;
+        ctx.onChunk = [&](const std::string& chunk) {
+            fullAnswer += chunk;
+            onChunk(chunk);
+        };
+        ctx.onDone = [&]() {
+            addMessage(userId, userName, false, fullAnswer, sessionId);
+            onDone();
+        };
+        executeCurlStream(secondReq, &ctx);
+        if (!ctx.done) {
+            addMessage(userId, userName, false, fullAnswer, sessionId);
+            onDone();
+        }
+
+    } catch (const std::exception& e) {
+        onError(e.what());
+    }
+}
+
 std::string AIHelper::escapeString(const std::string& input) {
     std::string output;
     output.reserve(input.size() * 2);

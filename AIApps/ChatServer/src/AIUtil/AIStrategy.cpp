@@ -127,6 +127,17 @@ std::string AliyunRAGStrategy::parseResponse(const json& response) const {
     return {};
 }
 
+// RAG streaming uses incremental_output; each chunk carries output.text with the delta
+std::string AliyunRAGStrategy::parseStreamDelta(const json& chunk) const {
+    try {
+        if (chunk.contains("output") && chunk["output"].contains("text")
+            && chunk["output"]["text"].is_string()) {
+            return chunk["output"]["text"].get<std::string>();
+        }
+    } catch (...) {}
+    return {};
+}
+
 
 
 std::string AliyunMcpStrategy::getApiUrl() const {

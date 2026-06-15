@@ -80,6 +80,11 @@ public:
         router_.registerHandler(HttpRequest::kPost, path, handler);
     }
 
+    void PostStream(const std::string& path, router::Router::StreamHandlerPtr handler)
+    {
+        router_.registerStreamHandler(HttpRequest::kPost, path, handler);
+    }
+
     // 注册动态路由处理器
     void addRoute(HttpRequest::Method method, const std::string& path, router::Router::HandlerPtr handler)
     {

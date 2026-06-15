@@ -29,6 +29,21 @@ public:
 
     virtual std::string parseResponse(const json& response) const = 0;
 
+    // Extract the text delta from a single streaming SSE chunk.
+    // Default handles the OpenAI-compatible format used by Aliyun and DouBao.
+    // Override in strategies that use a different streaming shape (e.g. RAG).
+    virtual std::string parseStreamDelta(const json& chunk) const {
+        try {
+            if (chunk.contains("choices") && !chunk["choices"].empty()) {
+                const auto& delta = chunk["choices"][0]["delta"];
+                if (delta.contains("content") && delta["content"].is_string()) {
+                    return delta["content"].get<std::string>();
+                }
+            }
+        } catch (...) {}
+        return {};
+    }
+
     bool isMCPModel = false;
 
 };
@@ -90,6 +105,7 @@ public:
 
     json buildRequest(const std::vector<std::pair<std::string, long long>>& messages) const override;
     std::string parseResponse(const json& response) const override;
+    std::string parseStreamDelta(const json& chunk) const override;
 
 private:
     std::string apiKey_;

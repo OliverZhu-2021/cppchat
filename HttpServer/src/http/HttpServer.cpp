@@ -144,6 +144,12 @@ void HttpServer::onMessage(const muduo::net::TcpConnectionPtr &conn,
 
 void HttpServer::onRequest(const muduo::net::TcpConnectionPtr &conn, const HttpRequest &req)
 {
+    // Stream routes manage the connection directly — skip the normal HttpResponse path
+    if (router_.routeStream(req, conn))
+    {
+        return;
+    }
+
     const std::string &connection = req.getHeader("Connection");
     bool close = ((connection == "close") ||
                   (req.getVersion() == "HTTP/1.0" && connection != "Keep-Alive"));

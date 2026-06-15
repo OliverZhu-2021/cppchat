@@ -18,6 +18,24 @@ void Router::registerCallback(HttpRequest::Method method, const std::string &pat
     callbacks_[key] = std::move(callback);
 }
 
+void Router::registerStreamHandler(HttpRequest::Method method, const std::string &path, StreamHandlerPtr handler)
+{
+    RouteKey key{method, path};
+    streamHandlers_[key] = std::move(handler);
+}
+
+bool Router::routeStream(const HttpRequest &req, muduo::net::TcpConnectionPtr conn)
+{
+    RouteKey key{req.method(), req.path()};
+    auto it = streamHandlers_.find(key);
+    if (it != streamHandlers_.end())
+    {
+        it->second->handle(req, conn);
+        return true;
+    }
+    return false;
+}
+
 bool Router::route(const HttpRequest &req, HttpResponse *resp)
 {
     RouteKey key{req.method(), req.path()};
