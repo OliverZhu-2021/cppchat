@@ -13,6 +13,8 @@
 #include"../include/handlers/ChatCreateAndSendHandler.h"
 #include"../include/handlers/ChatSessionsHandler.h"
 #include"../include/handlers/ChatSpeechHandler.h"
+#include"../include/handlers/ChatStreamHandler.h"
+#include"../include/handlers/ChatCreateAndStreamHandler.h"
 
 #include "../include/ChatServer.h"
 #include "../../../HttpServer/include/http/HttpRequest.h"
@@ -151,6 +153,10 @@ void ChatServer::initializeRouter() {
     httpServer_.Get("/chat/sessions", std::make_shared<ChatSessionsHandler>(this));
 
     httpServer_.Post("/chat/tts", std::make_shared<ChatSpeechHandler>(this));
+
+    // Streaming endpoints (SSE) — bypass the normal HttpResponse path
+    httpServer_.PostStream("/chat/send-stream", std::make_shared<ChatStreamHandler>(this));
+    httpServer_.PostStream("/chat/create-and-send-stream", std::make_shared<ChatCreateAndStreamHandler>(this));
 }
 
 void ChatServer::initializeSession() {

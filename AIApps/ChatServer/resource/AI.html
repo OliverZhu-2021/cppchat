@@ -349,68 +349,136 @@
             clearMessages();
         });
 
+        // Creates an assistant message bubble that can be updated incrementally.
+        // Returns { append(chunk), finalize() → fullText }.
+        function createStreamingMessage() {
+            const msgDiv = document.createElement('div');
+            msgDiv.classList.add('message', 'assistant');
+            msgDiv.innerHTML = `<div style="display:flex; align-items:center; gap:10px;">
+                <div style="flex:1;"><b>AI:</b><br><div class="stream-content"></div></div>
+            </div>`;
+            chatContainer.appendChild(msgDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            let rawContent = '';
+            const contentEl = msgDiv.querySelector('.stream-content');
+
+            return {
+                append(chunk) {
+                    rawContent += chunk;
+                    contentEl.innerHTML = DOMPurify.sanitize(marked.parse(rawContent));
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                },
+                finalize() {
+                    const escaped = rawContent.replace(/`/g, '\\`').replace(/\$/g, '\\$');
+                    msgDiv.innerHTML = `<div style="display:flex; align-items:center; gap:10px;">
+                        <div style="flex:1;"><b>AI:</b><br>${DOMPurify.sanitize(marked.parse(rawContent))}</div>
+                        <button class="tts-btn" onclick="playTTS(\`${escaped}\`)">🔊</button>
+                    </div>`;
+                    return rawContent;
+                }
+            };
+        }
+
+        // Reads an SSE stream from url, calling onEvent({content?, sessionId?, error?}) per event.
+        async function streamFetch(url, body, onEvent, onDone) {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!response.ok) {
+                onEvent({ error: 'HTTP ' + response.status });
+                onDone(); return;
+            }
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const parts = buffer.split('\n\n');
+                    buffer = parts.pop();
+                    for (const part of parts) {
+                        for (const line of part.split('\n')) {
+                            const trimmed = line.trim();
+                            if (!trimmed.startsWith('data: ')) continue;
+                            const data = trimmed.slice(6);
+                            if (data === '[DONE]') { onDone(); return; }
+                            try { onEvent(JSON.parse(data)); } catch (_) {}
+                        }
+                    }
+                }
+            } finally {
+                reader.releaseLock();
+            }
+            onDone();
+        }
+
         chatForm.addEventListener('submit', async e => {
             e.preventDefault();
             const question = questionInput.value.trim();
             if (!question) return;
 
             appendMessage('user', question);
+            questionInput.value = '';
 
             if (!tempSession && (!currentSessionId || !sessions[currentSessionId])) {
                 currentSessionId = 'temp';
                 tempSession = true;
             }
 
-            if (tempSession) {
-                try {
-                    const response = await fetch('/chat/send-new-session', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ question, modelType: modelTypeSelect.value })
-                    });
-                    const data = await response.json();
-                    if (data.success) {
-                        const sessionId = String(data.sessionId);
-                        sessions[sessionId] = {
-                            name: '新会话',
-                            messages: [
-                                { role: 'user', content: question },
-                                { role: 'assistant', content: data.Information }
-                            ]
-                        };
-                        currentSessionId = sessionId;
-                        tempSession = false;
-                        renderSessionList();
-                        appendMessage('assistant', data.Information);
-                    } else {
-                        appendMessage('assistant', '[错误] ' + (data.message || '未知错误'));
-                    }
-                } catch (err) {
-                    console.error(err);
-                    appendMessage('assistant', '[错误] 无法连接到服务器');
-                }
-            } else {
-                sessions[currentSessionId].messages.push({ role: 'user', content: question });
-                try {
-                    const response = await fetch('/chat/send', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ question, modelType: modelTypeSelect.value, sessionId: currentSessionId })
-                    });
-                    const data = await response.json();
-                    if (data.success) {
-                        appendMessage('assistant', data.Information);
-                        sessions[currentSessionId].messages.push({ role: 'assistant', content: data.Information });
-                    } else {
-                        appendMessage('assistant', '[错误] ' + (data.message || '未知错误'));
-                    }
-                } catch (err) {
-                    console.error(err);
-                    appendMessage('assistant', '[错误] 无法连接到服务器');
-                }
-            }
+            const submitBtn = chatForm.querySelector('button[type="submit"]');
+            submitBtn.disabled = true;
 
-            questionInput.value = '';
+            const streamMsg = createStreamingMessage();
+
+            const onDone = () => {
+                const fullContent = streamMsg.finalize();
+                if (currentSessionId && sessions[currentSessionId]) {
+                    sessions[currentSessionId].messages.push({ role: 'assistant', content: fullContent });
+                }
+                submitBtn.disabled = false;
+            };
+
+            try {
+                if (tempSession) {
+                    await streamFetch(
+                        '/chat/create-and-send-stream',
+                        { question, modelType: modelTypeSelect.value },
+                        (event) => {
+                            if (event.sessionId) {
+                                const sid = String(event.sessionId);
+                                sessions[sid] = { name: question.slice(0, 20) || '新会话', messages: [{ role: 'user', content: question }] };
+                                currentSessionId = sid;
+                                tempSession = false;
+                                renderSessionList();
+                            }
+                            if (event.content !== undefined) streamMsg.append(event.content);
+                            if (event.error)   streamMsg.append('[错误] ' + event.error);
+                        },
+                        onDone
+                    );
+                } else {
+                    sessions[currentSessionId].messages.push({ role: 'user', content: question });
+                    await streamFetch(
+                        '/chat/send-stream',
+                        { question, modelType: modelTypeSelect.value, sessionId: currentSessionId },
+                        (event) => {
+                            if (event.content !== undefined) streamMsg.append(event.content);
+                            if (event.error)   streamMsg.append('[错误] ' + event.error);
+                        },
+                        onDone
+                    );
+                }
+            } catch (err) {
+                console.error(err);
+                streamMsg.append('[错误] 无法连接到服务器');
+                streamMsg.finalize();
+                submitBtn.disabled = false;
+            }
         });
 
         syncBtn.addEventListener('click', async () => {

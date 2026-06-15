@@ -23,6 +23,7 @@ class Router
 {
 public:
     using HandlerPtr = std::shared_ptr<RouterHandler>;
+    using StreamHandlerPtr = std::shared_ptr<StreamRouterHandler>;
     using HandlerCallback = std::function<void(const HttpRequest &, HttpResponse *)>;
 
     // 路由键（请求方法 + URI）
@@ -56,6 +57,9 @@ public:
     // 注册路由处理器
     void registerHandler(HttpRequest::Method method, const std::string &path, HandlerPtr handler);
 
+    // 注册流式路由处理器
+    void registerStreamHandler(HttpRequest::Method method, const std::string &path, StreamHandlerPtr handler);
+
     // 注册回调函数形式的处理器
     void registerCallback(HttpRequest::Method method, const std::string &path, const HandlerCallback &callback);
 
@@ -75,6 +79,9 @@ public:
 
     // 处理请求
     bool route(const HttpRequest &req, HttpResponse *resp);
+
+    // 处理流式请求，匹配则调用流式处理器并返回 true
+    bool routeStream(const HttpRequest &req, muduo::net::TcpConnectionPtr conn);
 
 private:
     std::regex convertToRegex(const std::string &pathPattern)
@@ -112,10 +119,11 @@ private:
             : method_(method), pathRegex_(pathRegex), handler_(handler) {}
     };
 
-    std::unordered_map<RouteKey, HandlerPtr, RouteKeyHash>      handlers_;       // 精准匹配
-    std::unordered_map<RouteKey, HandlerCallback, RouteKeyHash> callbacks_; // 精准匹配
-    std::vector<RouteHandlerObj>                                regexHandlers_;     // 正则匹配
-    std::vector<RouteCallbackObj>                               regexCallbacks_;   // 正则匹配
+    std::unordered_map<RouteKey, HandlerPtr, RouteKeyHash>       handlers_;       // 精准匹配
+    std::unordered_map<RouteKey, StreamHandlerPtr, RouteKeyHash> streamHandlers_; // 流式精准匹配
+    std::unordered_map<RouteKey, HandlerCallback, RouteKeyHash>  callbacks_;      // 精准匹配
+    std::vector<RouteHandlerObj>                                 regexHandlers_;  // 正则匹配
+    std::vector<RouteCallbackObj>                                regexCallbacks_; // 正则匹配
 };
 
 
